@@ -1,0 +1,52 @@
+name: 'HTTP Remote Deploy'
+description: 'Trigger deployment via HTTP Remote API for CI/CD automation'
+author: 'pandeptwidyaop'
+
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
+
+inputs:
+  remote-url:
+    description: 'Base URL of HTTP Remote server (e.g., https://app.example.com)'
+    required: true
+  app-id:
+    description: 'Application UUID from HTTP Remote'
+    required: true
+  deploy-token:
+    description: 'Deploy token for the application'
+    required: true
+  command-id:
+    description: 'Specific command UUID to execute (optional, uses default command if not provided)'
+    required: false
+    default: ''
+  path-prefix:
+    description: 'Path prefix configured on server'
+    required: false
+    default: '/devops'
+  wait:
+    description: 'Wait for deployment to complete before finishing'
+    required: false
+    default: 'true'
+  timeout:
+    description: 'Timeout in seconds when waiting for completion'
+    required: false
+    default: '600'
+  verbose:
+    description: 'Enable verbose logging'
+    required: false
+    default: 'false'
+
+outputs:
+  execution-id:
+    description: 'Execution UUID from HTTP Remote'
+  status:
+    description: 'Final deployment status (success/failed/timeout)'
+  exit-code:
+    description: 'Command exit code'
+  output:
+    description: 'Command output (truncated if too long)'
+
+runs:
+  using: 'node20'
+  main: 'main.js'
