@@ -53,7 +53,7 @@ async function triggerDeploy(baseUrl, pathPrefix, appId, token, commandId, verbo
     body
   );
 
-  if (response.statusCode !== 200) {
+  if (response.statusCode !== 200 && response.statusCode !== 202) {
     throw new Error(`Deployment trigger failed with HTTP ${response.statusCode}: ${response.body}`);
   }
 
