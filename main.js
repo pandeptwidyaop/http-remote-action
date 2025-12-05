@@ -87,6 +87,109 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+async function streamOutput(baseUrl, pathPrefix, appId, executionId, token, timeout, verbose) {
+  return new Promise((resolve, reject) => {
+    const streamUrl = `${baseUrl}${pathPrefix}/deploy/${appId}/stream/${executionId}`;
+    log(`Connecting to stream: ${streamUrl}`, verbose);
+
+    const parsedUrl = new URL(streamUrl);
+    const protocol = parsedUrl.protocol === "https:" ? https : http;
+
+    const startTime = Date.now();
+    let outputLines = [];
+    let lastActivity = Date.now();
+
+    const req = protocol.request(streamUrl, {
+      method: "GET",
+      headers: {
+        "Accept": "text/event-stream",
+        "X-Deploy-Token": token,
+      },
+    }, (res) => {
+      if (res.statusCode !== 200) {
+        reject(new Error(`Stream failed with HTTP ${res.statusCode}`));
+        return;
+      }
+
+      let buffer = "";
+
+      res.on("data", (chunk) => {
+        lastActivity = Date.now();
+        buffer += chunk.toString();
+
+        // Process complete SSE messages
+        const lines = buffer.split("\n\n");
+        buffer = lines.pop() || ""; // Keep incomplete message in buffer
+
+        for (const message of lines) {
+          if (!message.trim()) continue;
+
+          const eventMatch = message.match(/event: (\w+)\ndata: (.+)/s);
+          if (!eventMatch) continue;
+
+          const [, event, data] = eventMatch;
+
+          if (event === "output") {
+            console.log(data);
+            outputLines.push(data);
+          } else if (event === "complete") {
+            try {
+              const result = JSON.parse(data);
+              resolve({
+                status: result.status,
+                exit_code: result.exit_code,
+                output: outputLines.join("\n"),
+              });
+            } catch (e) {
+              reject(new Error(`Invalid complete event: ${data}`));
+            }
+            return;
+          }
+        }
+      });
+
+      res.on("end", () => {
+        // Stream ended without complete event, check final status
+        checkStatus(baseUrl, pathPrefix, "", executionId, token, verbose)
+          .then((status) => {
+            resolve({
+              status: status.status,
+              exit_code: status.exit_code,
+              output: status.output || outputLines.join("\n"),
+            });
+          })
+          .catch(reject);
+      });
+
+      res.on("error", reject);
+    });
+
+    req.on("error", reject);
+    req.end();
+
+    // Timeout check
+    const timeoutCheck = setInterval(() => {
+      const elapsed = (Date.now() - startTime) / 1000;
+      const idle = (Date.now() - lastActivity) / 1000;
+
+      if (elapsed >= timeout) {
+        clearInterval(timeoutCheck);
+        req.destroy();
+        resolve({
+          status: "timeout",
+          exit_code: -1,
+          output: outputLines.join("\n"),
+        });
+      } else if (idle > 30) {
+        // If no activity for 30s, reconnect might be needed
+        log(`No activity for ${Math.round(idle)}s, stream might have disconnected`, verbose);
+      }
+    }, 5000);
+
+    req.on("close", () => clearInterval(timeoutCheck));
+  });
+}
+
 async function waitForCompletion(baseUrl, pathPrefix, appId, executionId, token, timeout, verbose) {
   const startTime = Date.now();
   const pollInterval = 5000; // 5 seconds
@@ -159,17 +262,38 @@ async function run() {
       return;
     }
 
-    // Wait for completion
-    console.log("\n⏳ Waiting for deployment to complete...");
-    const finalStatus = await waitForCompletion(
-      baseUrl,
-      pathPrefix,
-      appId,
-      executionId,
-      deployToken,
-      timeout,
-      verbose
-    );
+    // Stream output in real-time
+    console.log("\n⏳ Streaming deployment output...");
+    console.log("=".repeat(50));
+
+    let finalStatus;
+    try {
+      // Try streaming first (real-time output)
+      finalStatus = await streamOutput(
+        baseUrl,
+        pathPrefix,
+        appId,
+        executionId,
+        deployToken,
+        timeout,
+        verbose
+      );
+    } catch (streamError) {
+      // Fall back to polling if streaming fails
+      log(`Streaming failed: ${streamError.message}, falling back to polling`, verbose);
+      console.log("\n⏳ Waiting for deployment to complete...");
+      finalStatus = await waitForCompletion(
+        baseUrl,
+        pathPrefix,
+        appId,
+        executionId,
+        deployToken,
+        timeout,
+        verbose
+      );
+    }
+
+    console.log("=".repeat(50));
 
     // Set outputs
     core.setOutput("status", finalStatus.status);
@@ -181,17 +305,6 @@ async function run() {
       output = output.substring(0, MAX_OUTPUT_LENGTH) + "\n... (truncated)";
     }
     core.setOutput("output", output);
-
-    // Print output
-    console.log("\n" + "=".repeat(50));
-    console.log("📋 Deployment Output:");
-    console.log("=".repeat(50));
-    if (finalStatus.output) {
-      console.log(finalStatus.output);
-    } else {
-      console.log("(no output)");
-    }
-    console.log("=".repeat(50));
 
     // Handle result
     if (finalStatus.status === "success") {
