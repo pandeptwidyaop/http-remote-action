@@ -40,13 +40,41 @@ inputs:
 outputs:
   execution-id:
     description: 'Execution UUID from HTTP Remote'
+    value: ${{ steps.deploy.outputs.execution-id }}
   status:
     description: 'Final deployment status (success/failed/timeout)'
+    value: ${{ steps.deploy.outputs.status }}
   exit-code:
     description: 'Command exit code'
+    value: ${{ steps.deploy.outputs.exit-code }}
   output:
     description: 'Command output (truncated if too long)'
+    value: ${{ steps.deploy.outputs.output }}
 
 runs:
-  using: 'node20'
-  main: 'main.js'
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install dependencies
+      run: npm ci --production
+      shell: bash
+      working-directory: ${{ github.action_path }}
+
+    - name: Run deployment
+      id: deploy
+      run: node main.js
+      shell: bash
+      working-directory: ${{ github.action_path }}
+      env:
+        INPUT_REMOTE-URL: ${{ inputs.remote-url }}
+        INPUT_APP-ID: ${{ inputs.app-id }}
+        INPUT_DEPLOY-TOKEN: ${{ inputs.deploy-token }}
+        INPUT_COMMAND-ID: ${{ inputs.command-id }}
+        INPUT_PATH-PREFIX: ${{ inputs.path-prefix }}
+        INPUT_WAIT: ${{ inputs.wait }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_VERBOSE: ${{ inputs.verbose }}

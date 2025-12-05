@@ -1,10 +1,16 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with this repository.
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
 ## Project Overview
 
 This is a GitHub Action for triggering deployments via [HTTP Remote](https://github.com/pandeptwidyaop/http-remote) API. It enables CI/CD pipelines to deploy to private servers that are only accessible via HTTP (port 80/443).
+
+**Key characteristics:**
+- Composite GitHub Action that installs dependencies at runtime
+- Single-file implementation ([main.js](main.js))
+- Uses Node.js built-in `http`/`https` modules (no external HTTP library like axios/got)
+- No build step required - dependencies installed via `npm ci` when action runs
 
 ## Architecture
 
@@ -78,6 +84,17 @@ npm install
 node main.js
 ```
 
+**Action Type: Composite**
+- This is a **composite action** (`using: 'composite'` in [action.yml](action.yml))
+- Dependencies are installed at runtime via `npm ci --production`
+- No build step required - commit [main.js](main.js) and [package.json](package.json) directly
+- [action.yml](action.yml) defines steps that run when the action is used
+
+**Note on Testing**: This action has no automated test suite. Testing requires:
+- Running in actual GitHub Actions workflow, OR
+- Mocking the `@actions/core` module to simulate GitHub Actions environment
+- Access to a running HTTP Remote server for integration testing
+
 ## Common Modifications
 
 ### Adding New Input
@@ -94,8 +111,12 @@ Modify `pollInterval` constant in `waitForCompletion()` function (default: 5000m
 ## Publishing New Version
 
 ```bash
+# 1. Make changes to main.js
+# 2. Commit changes
 git add .
 git commit -m "Description of changes"
+
+# 3. Tag and push
 git tag -a v1.x.x -m "Version description"
 git push origin main --tags
 ```
@@ -105,6 +126,8 @@ For major version updates, also update the `v1` tag:
 git tag -fa v1 -m "Update v1 tag"
 git push origin v1 --force
 ```
+
+**Note**: As a composite action, no build step is needed. Just ensure [package.json](package.json) lists all required dependencies.
 
 ## Related Repository
 
